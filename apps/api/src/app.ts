@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
-import pinoHttp from "pino-http";
+import pinoHttpModule from "pino-http";
 import { env } from "./config.js";
 import { logger } from "./lib/logger.js";
 import healthRoutes from "./routes/health.js";
 import messageRoutes from "./routes/messages.js";
 
 const app = express();
+const pinoHttp = (pinoHttpModule as unknown as { default?: (opts: unknown) => express.RequestHandler }).default
+  ?? (pinoHttpModule as unknown as (opts: unknown) => express.RequestHandler);
 
 app.use(pinoHttp({ logger }));
 app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
