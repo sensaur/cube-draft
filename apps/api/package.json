@@ -11,9 +11,10 @@
     "start": "node dist/server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "prisma:generate": "prisma generate --schema ../../prisma/schema.prisma --config ../../prisma.config.ts",
-    "prisma:migrate": "prisma migrate deploy --schema ../../prisma/schema.prisma --config ../../prisma.config.ts",
-    "prisma:push": "prisma db push --schema ../../prisma/schema.prisma --config ../../prisma.config.ts"
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:push": "prisma db push"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",

@@ -9,6 +9,9 @@ coverage/
 apps/*/dist/
 apps/*/build/
 
+# generated code
+apps/api/src/generated/
+
 # logs
 logs/
 *.log
