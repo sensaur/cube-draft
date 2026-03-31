@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./react": "./react.js"
+    "./react": "./react.js",
+    "./node": "./node.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
