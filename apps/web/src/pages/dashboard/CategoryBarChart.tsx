@@ -37,7 +37,7 @@ export const CategoryBarChart = memo(function CategoryBarChart({ data, palette: 
             tickLine={false}
             tickFormatter={(v: number) => `€${(v / 1000).toFixed(0)}k`}
           />
-          <Tooltip {...s.tooltip} formatter={(value: number) => fmt$(value)} />
+          <Tooltip {...s.tooltip} formatter={(value) => fmt$(Number(value))} />
           <Bar dataKey="value" name="Revenue" radius={[4, 4, 0, 0]}>
             {data.map((_, i) => (
               <Cell key={i} fill={ACCENT.category[i % ACCENT.category.length]} />

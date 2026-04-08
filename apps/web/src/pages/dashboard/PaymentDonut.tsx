@@ -35,7 +35,7 @@ export const PaymentDonut = memo(function PaymentDonut({ data, palette: c, style
               <Cell key={i} fill={ACCENT.pie[i % ACCENT.pie.length]} />
             ))}
           </Pie>
-          <Tooltip {...s.tooltip} formatter={(value: number) => fmt$(value)} />
+          <Tooltip {...s.tooltip} formatter={(value) => fmt$(Number(value))} />
           <Legend wrapperStyle={{ fontSize: "0.75rem", color: c.muted }} />
         </PieChart>
       </ResponsiveContainer>

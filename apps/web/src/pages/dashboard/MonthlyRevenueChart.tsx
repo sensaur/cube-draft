@@ -48,7 +48,7 @@ export const MonthlyRevenueChart = memo(function MonthlyRevenueChart({
           <YAxis yAxisId="orders" orientation="right" tick={s.tick} axisLine={false} tickLine={false} />
           <Tooltip
             {...s.tooltip}
-            formatter={(value: number, name: string) => (name === "revenue" ? fmt$(value) : value)}
+            formatter={(value, name) => (name === "revenue" ? fmt$(Number(value)) : value)}
           />
           <Legend wrapperStyle={{ fontSize: "0.75rem", color: c.muted }} />
           <Bar yAxisId="revenue" dataKey="revenue" name="Revenue" fill={ACCENT.barFill} radius={[3, 3, 0, 0]} />

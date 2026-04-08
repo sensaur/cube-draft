@@ -29,7 +29,7 @@ export const CountryBarChart = memo(function CountryBarChart({ data, palette: c,
             tickFormatter={(v: number) => `€${(v / 1000).toFixed(0)}k`}
           />
           <YAxis dataKey="name" type="category" tick={s.tick} axisLine={false} tickLine={false} width={36} />
-          <Tooltip {...s.tooltip} formatter={(value: number) => fmt$(value)} />
+          <Tooltip {...s.tooltip} formatter={(value) => fmt$(Number(value))} />
           <Bar dataKey="value" name="Revenue" fill={ACCENT.countryBar} radius={[0, 4, 4, 0]} />
         </BarChart>
       </ResponsiveContainer>
