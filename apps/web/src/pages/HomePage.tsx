@@ -19,7 +19,7 @@ const highlights = [
   "Live Map — WebSocket + react-simple-maps",
   "AI chat — Claude on HTTP request logs (no Cube.js in repo)",
   "Chat: multiple threads, DB history, auto titles",
-  "Express, Prisma, PostgreSQL — pnpm workspaces, Turborepo",
+  "Express, Prisma, PostgreSQL — pnpm workspaces, Turborepo.",
 ];
 
 export default function HomePage() {
