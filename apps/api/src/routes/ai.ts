@@ -51,6 +51,16 @@ function truncateForLog(s: string, max = LOG_BODY_PREVIEW): string {
   return `${s.slice(0, max)}…[truncated ${s.length - max} chars]`;
 }
 
+function isAnthropicOverloaded(httpStatus: number, body: string): boolean {
+  if (httpStatus === 529) return true;
+  try {
+    const j = JSON.parse(body) as { error?: { type?: string } };
+    return j?.error?.type === "overloaded_error";
+  } catch {
+    return false;
+  }
+}
+
 function toConversationDto(c: {
   id: string;
   sessionId: string;
@@ -279,7 +289,7 @@ router.post("/api/ai/query", async (req, res) => {
       return;
     }
 
-    await prisma.aiChat.create({
+    const userChatRow = await prisma.aiChat.create({
       data: { conversationId, role: "user", content: question },
     });
 
@@ -339,6 +349,19 @@ router.post("/api/ai/query", async (req, res) => {
         `durationMs=${anthropicMs} bodyLen=${errBody.length} preview=${preview}`;
       log.error(payload, msg);
       logger.error(payload, msg);
+
+      if (isAnthropicOverloaded(anthropicRes.status, errBody)) {
+        await prisma.aiChat.delete({ where: { id: userChatRow.id } }).catch(() => {
+          /* best-effort rollback */
+        });
+        res.status(503).json({
+          code: "AI_OVERLOADED",
+          error:
+            "The AI service is temporarily overloaded. Please try again in a few moments.",
+        });
+        return;
+      }
+
       res.status(502).json({ error: "AI service returned an error" });
       return;
     }

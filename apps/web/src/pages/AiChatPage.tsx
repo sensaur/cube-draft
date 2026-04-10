@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useThemeStore } from "@/store/themeStore";
 import { getPalette, buildStyles } from "./dashboard/theme";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { getSessionId } from "@/lib/session";
 import type {
   AiConversation,
@@ -15,6 +15,9 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   data?: Array<Record<string, unknown>> | null;
+  /** Assistant-only: Anthropic overloaded — show Retry */
+  aiOverloaded?: boolean;
+  retryQuestion?: string;
 }
 
 const SUGGESTIONS = [
@@ -108,18 +111,21 @@ export default function AiChatPage() {
     return () => { cancelled = true; };
   }, [activeId]);
 
-  async function send(question: string) {
-    if (!question.trim() || loading || !activeId) return;
+  async function send(question: string, options?: { skipUserMessage?: boolean }) {
+    const q = question.trim();
+    if (!q || loading || !activeId) return;
 
-    const userMsg: ChatMessage = { id: localId(), role: "user", text: question.trim() };
-    setMessages((prev) => [...prev, userMsg]);
+    if (!options?.skipUserMessage) {
+      const userMsg: ChatMessage = { id: localId(), role: "user", text: q };
+      setMessages((prev) => [...prev, userMsg]);
+    }
     setInput("");
     setLoading(true);
 
     try {
       const res = await apiFetch<AiQueryResponse>("/api/ai/query", {
         method: "POST",
-        body: JSON.stringify({ conversationId: activeId, question: question.trim() }),
+        body: JSON.stringify({ conversationId: activeId, question: q }),
       });
 
       const assistantMsg: ChatMessage = {
@@ -135,16 +141,32 @@ export default function AiChatPage() {
       );
       setConversations(refreshed.conversations);
     } catch (err) {
-      const errorMsg: ChatMessage = {
-        id: localId(),
-        role: "assistant",
-        text: err instanceof Error ? err.message : "Something went wrong",
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      if (err instanceof ApiError && err.code === "AI_OVERLOADED") {
+        const errorMsg: ChatMessage = {
+          id: localId(),
+          role: "assistant",
+          text: err.message,
+          aiOverloaded: true,
+          retryQuestion: q,
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } else {
+        const errorMsg: ChatMessage = {
+          id: localId(),
+          role: "assistant",
+          text: err instanceof Error ? err.message : "Something went wrong",
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      }
     } finally {
       setLoading(false);
       inputRef.current?.focus();
     }
+  }
+
+  function handleRetryOverload(messageId: string, question: string) {
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    void send(question, { skipUserMessage: true });
   }
 
   async function handleNewChat() {
@@ -363,6 +385,18 @@ export default function AiChatPage() {
             <div key={msg.id} style={{ display: "flex", flexDirection: "column" }}>
               <div style={msg.role === "user" ? bubbleUser : bubbleAssistant}>
                 {msg.text}
+                {msg.aiOverloaded && msg.retryQuestion && (
+                  <div className="mt-3 pt-2 border-top border-secondary-subtle">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      disabled={loading}
+                      onClick={() => handleRetryOverload(msg.id, msg.retryQuestion!)}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
               </div>
 
               {msg.data && msg.data.length > 0 && (
