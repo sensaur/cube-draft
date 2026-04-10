@@ -20,6 +20,8 @@ Each log entry has these fields:
 - path: request path (e.g. /api/sales, /health)
 - statusCode: HTTP status code (200, 404, 500, etc.)
 - responseTimeMs: response time in milliseconds
+- ip: client IP address (can be used to infer geographic origin)
+- userAgent: browser/client user-agent string
 - createdAt: ISO 8601 timestamp
 
 Analyze the data and answer the user's question. You MUST respond with ONLY valid JSON — no markdown, no code fences, no explanation outside the JSON.
@@ -55,6 +57,8 @@ router.post("/api/ai/query", async (req, res) => {
         path: true,
         statusCode: true,
         responseTimeMs: true,
+        ip: true,
+        userAgent: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
