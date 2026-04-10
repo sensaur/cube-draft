@@ -165,14 +165,29 @@ async function generateTitle(
 
     if (!res.ok) {
       const errBody = await res.text();
-      log.warn({
-        ai: "title",
-        phase: "anthropic_error",
-        httpStatus: res.status,
-        durationMs,
-        bodyPreview: truncateForLog(errBody, 1500),
-        bodyLen: errBody.length,
-      }, "generateTitle: Anthropic non-OK");
+      const tPrev = truncateForLog(errBody, 1500);
+      log.warn(
+        {
+          ai: "title",
+          phase: "anthropic_error",
+          httpStatus: res.status,
+          durationMs,
+          bodyPreview: tPrev,
+          bodyLen: errBody.length,
+        },
+        `[ai-query] title_generation anthropic_error status=${res.status} preview=${tPrev}`,
+      );
+      logger.warn(
+        {
+          ai: "title",
+          phase: "anthropic_error",
+          httpStatus: res.status,
+          durationMs,
+          bodyPreview: tPrev,
+          bodyLen: errBody.length,
+        },
+        `[ai-query] title_generation anthropic_error status=${res.status}`,
+      );
       return "New chat";
     }
 
@@ -308,15 +323,22 @@ router.post("/api/ai/query", async (req, res) => {
 
     if (!anthropicRes.ok) {
       const errBody = await anthropicRes.text();
-      log.error({
-        ai: "query",
-        phase: "anthropic_http_error",
+      const preview = truncateForLog(errBody, 1200);
+      const payload = {
+        ai: "query" as const,
+        phase: "anthropic_http_error" as const,
         conversationId,
         httpStatus: anthropicRes.status,
         durationMs: anthropicMs,
         bodyLen: errBody.length,
-        bodyPreview: truncateForLog(errBody),
-      }, "Anthropic returned non-2xx (client gets 502)");
+        bodyPreview: preview,
+      };
+      // Put markers in `msg` — Railway log search often matches only the message string, not nested JSON.
+      const msg =
+        `[ai-query] anthropic_http_error upstream_status=${anthropicRes.status} ` +
+        `durationMs=${anthropicMs} bodyLen=${errBody.length} preview=${preview}`;
+      log.error(payload, msg);
+      logger.error(payload, msg);
       res.status(502).json({ error: "AI service returned an error" });
       return;
     }
@@ -385,10 +407,10 @@ router.post("/api/ai/query", async (req, res) => {
     log.info({ ai: "query", phase: "complete", conversationId }, "AI query: success");
     res.json(result);
   } catch (err) {
-    log.error(
-      { err, ai: "query", phase: "unhandled_exception", conversationId },
-      "AI query failed (client gets 500)",
-    );
+    const payload = { err, ai: "query" as const, phase: "unhandled_exception" as const, conversationId };
+    const msg = `[ai-query] unhandled_exception conversationId=${conversationId}`;
+    log.error(payload, msg);
+    logger.error(payload, msg);
     res.status(500).json({ error: "Internal server error" });
   }
 });
