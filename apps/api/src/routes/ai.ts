@@ -1,4 +1,5 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
+import type { Logger } from "pino";
 import { z } from "zod";
 import { aiQueryBodySchema } from "../schemas/aiQueryBody.js";
 import { prisma } from "../lib/prisma.js";
@@ -37,6 +38,18 @@ If a table is not useful for the answer, omit the "data" field entirely.
 Keep answers concise and data-driven.`;
 
 const sessionIdSchema = z.string().uuid();
+
+const LOG_BODY_PREVIEW = 4000;
+
+function reqLog(req: Request): Logger {
+  const withLog = req as Request & { log?: Logger };
+  return withLog.log ?? logger;
+}
+
+function truncateForLog(s: string, max = LOG_BODY_PREVIEW): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…[truncated ${s.length - max} chars]`;
+}
 
 function toConversationDto(c: {
   id: string;
@@ -124,8 +137,14 @@ router.get("/api/ai/conversations/:id/messages", async (req, res) => {
 
 // --- AI Query ---
 
-async function generateTitle(apiKey: string, question: string, answer: string): Promise<string> {
+async function generateTitle(
+  apiKey: string,
+  question: string,
+  answer: string,
+  log: Logger,
+): Promise<string> {
   try {
+    const t0 = Date.now();
     const res = await fetch(ANTHROPIC_API_URL, {
       method: "POST",
       headers: {
@@ -142,8 +161,20 @@ async function generateTitle(apiKey: string, question: string, answer: string): 
         }],
       }),
     });
+    const durationMs = Date.now() - t0;
 
-    if (!res.ok) return "New chat";
+    if (!res.ok) {
+      const errBody = await res.text();
+      log.warn({
+        ai: "title",
+        phase: "anthropic_error",
+        httpStatus: res.status,
+        durationMs,
+        bodyPreview: truncateForLog(errBody, 1500),
+        bodyLen: errBody.length,
+      }, "generateTitle: Anthropic non-OK");
+      return "New chat";
+    }
 
     const data = (await res.json()) as { content: Array<{ type: string; text: string }> };
     const title = data.content
@@ -153,21 +184,26 @@ async function generateTitle(apiKey: string, question: string, answer: string): 
       .trim()
       .replace(/^["']|["']$/g, "");
 
+    log.info({ ai: "title", phase: "ok", durationMs, titleLen: title.length }, "generateTitle: success");
     return title || "New chat";
-  } catch {
+  } catch (err) {
+    log.warn({ err, ai: "title", phase: "exception" }, "generateTitle: threw");
     return "New chat";
   }
 }
 
 router.post("/api/ai/query", async (req, res) => {
+  const log = reqLog(req);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
+    log.warn({ ai: "query", phase: "no_api_key" }, "ANTHROPIC_API_KEY missing");
     res.status(503).json({ error: "AI service is not configured" });
     return;
   }
 
   const parsed = aiQueryBodySchema.safeParse(req.body);
   if (!parsed.success) {
+    log.info({ ai: "query", phase: "validation_failed", issues: parsed.error.flatten() }, "invalid body");
     res.status(400).json({
       error: "Invalid request",
       details: parsed.error.flatten().fieldErrors,
@@ -177,7 +213,16 @@ router.post("/api/ai/query", async (req, res) => {
 
   const { conversationId, question } = parsed.data;
 
+  log.info({
+    ai: "query",
+    phase: "start",
+    conversationId,
+    questionLen: question.length,
+    questionPreview: truncateForLog(question, 200),
+  }, "AI query: received");
+
   try {
+    const dbT0 = Date.now();
     const [logs, history, conversation] = await Promise.all([
       prisma.requestLog.findMany({
         select: {
@@ -201,8 +246,20 @@ router.post("/api/ai/query", async (req, res) => {
         where: { id: conversationId },
       }),
     ]);
+    const dbMs = Date.now() - dbT0;
+
+    log.info({
+      ai: "query",
+      phase: "db_loaded",
+      conversationId,
+      dbMs,
+      requestLogRows: logs.length,
+      priorChatTurns: history.length,
+      conversationFound: Boolean(conversation),
+    }, "AI query: Prisma load complete");
 
     if (!conversation) {
+      log.warn({ ai: "query", phase: "conversation_not_found", conversationId }, "unknown conversation");
       res.status(404).json({ error: "Conversation not found" });
       return;
     }
@@ -219,6 +276,20 @@ router.post("/api/ai/query", async (req, res) => {
 
     const userMessage = `Here are the latest ${logs.length} HTTP request logs:\n\n${JSON.stringify(logs)}\n\nQuestion: ${question}`;
 
+    const messagesPayload = [...historyMessages, { role: "user" as const, content: userMessage }];
+    const approxUserPayloadChars = messagesPayload.reduce((n, m) => n + m.content.length, 0);
+
+    log.info({
+      ai: "query",
+      phase: "anthropic_request",
+      conversationId,
+      model: MODEL,
+      messageCount: messagesPayload.length,
+      approxUserPayloadChars,
+      systemPromptChars: SYSTEM_PROMPT.length,
+    }, "AI query: calling Anthropic");
+
+    const anthropicT0 = Date.now();
     const anthropicRes = await fetch(ANTHROPIC_API_URL, {
       method: "POST",
       headers: {
@@ -230,19 +301,30 @@ router.post("/api/ai/query", async (req, res) => {
         model: MODEL,
         max_tokens: 1024,
         system: SYSTEM_PROMPT,
-        messages: [...historyMessages, { role: "user", content: userMessage }],
+        messages: messagesPayload,
       }),
     });
+    const anthropicMs = Date.now() - anthropicT0;
 
     if (!anthropicRes.ok) {
       const errBody = await anthropicRes.text();
-      logger.error({ status: anthropicRes.status, body: errBody }, "Anthropic API error");
+      log.error({
+        ai: "query",
+        phase: "anthropic_http_error",
+        conversationId,
+        httpStatus: anthropicRes.status,
+        durationMs: anthropicMs,
+        bodyLen: errBody.length,
+        bodyPreview: truncateForLog(errBody),
+      }, "Anthropic returned non-2xx (client gets 502)");
       res.status(502).json({ error: "AI service returned an error" });
       return;
     }
 
     const anthropicData = (await anthropicRes.json()) as {
       content: Array<{ type: string; text: string }>;
+      stop_reason?: string;
+      usage?: { input_tokens?: number; output_tokens?: number };
     };
 
     const rawText = anthropicData.content
@@ -250,10 +332,28 @@ router.post("/api/ai/query", async (req, res) => {
       .map((block) => block.text)
       .join("");
 
+    log.info({
+      ai: "query",
+      phase: "anthropic_ok",
+      conversationId,
+      durationMs: anthropicMs,
+      stopReason: anthropicData.stop_reason,
+      usage: anthropicData.usage,
+      assistantTextChars: rawText.length,
+      assistantPreview: truncateForLog(rawText, 300),
+    }, "Anthropic response OK");
+
     let result: AiQueryResponse;
     try {
       result = JSON.parse(rawText) as AiQueryResponse;
-    } catch {
+    } catch (parseErr) {
+      log.warn({
+        err: parseErr,
+        ai: "query",
+        phase: "json_parse_fallback",
+        conversationId,
+        rawPreview: truncateForLog(rawText, 500),
+      }, "Assistant text was not JSON; returning as plain answer");
       result = { answer: rawText };
     }
 
@@ -267,16 +367,28 @@ router.post("/api/ai/query", async (req, res) => {
     });
 
     if (isFirstMessage) {
-      const title = await generateTitle(apiKey, question, result.answer);
+      const titleT0 = Date.now();
+      const title = await generateTitle(apiKey, question, result.answer, log);
       await prisma.aiConversation.update({
         where: { id: conversationId },
         data: { title },
       });
+      log.info({
+        ai: "query",
+        phase: "title_updated",
+        conversationId,
+        titleMs: Date.now() - titleT0,
+        title,
+      }, "Conversation title set");
     }
 
+    log.info({ ai: "query", phase: "complete", conversationId }, "AI query: success");
     res.json(result);
   } catch (err) {
-    logger.error(err, "AI query failed");
+    log.error(
+      { err, ai: "query", phase: "unhandled_exception", conversationId },
+      "AI query failed (client gets 500)",
+    );
     res.status(500).json({ error: "Internal server error" });
   }
 });
